@@ -1,0 +1,8 @@
+{
+  "env": {
+    "ANTHROPIC_BASE_URL": "https://your-anthropic-compatible-gateway.example",
+    "ANTHROPIC_AUTH_TOKEN": "replace-with-a-local-secret",
+    "HTTP_PROXY": "http://proxy.example:8080",
+    "HTTPS_PROXY": "http://proxy.example:8080"
+  }
+}

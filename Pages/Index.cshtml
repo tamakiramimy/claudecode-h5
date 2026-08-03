@@ -1,0 +1,145 @@
+@page
+@{
+    Layout = null;
+    ViewData["Title"] = "Local Agent Workbench";
+}
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>@ViewData["Title"]</title>
+    <script src="https://unpkg.com/lucide@0.468.0/dist/umd/lucide.min.js" defer></script>
+    <link rel="stylesheet" href="~/css/site.css" />
+    <script src="~/js/chat.js" defer></script>
+</head>
+<body>
+    <main class="workbench" id="workbench">
+        <aside class="sidebar" id="sidebar" aria-label="会话导航">
+            <div class="sidebar-topline">
+                <a class="brand" href="/" aria-label="Local Agent Workbench">
+                    <span class="brand-mark" aria-hidden="true"><i data-lucide="bot"></i></span>
+                    <span class="brand-copy">
+                        <strong>Local Agent</strong>
+                        <small>Workbench</small>
+                    </span>
+                </a>
+                <button id="sidebar-close-button" class="icon-button sidebar-close" type="button" aria-label="关闭导航" data-tooltip="关闭导航">
+                    <i data-lucide="panel-left-close"></i>
+                </button>
+            </div>
+
+            <div class="workspace-control">
+                <label for="workspace-select">工作区</label>
+                <select id="workspace-select" aria-label="选择受信任工作区"></select>
+            </div>
+
+            <button id="new-session-button" class="new-session-button" type="button">
+                <i data-lucide="square-pen"></i>
+                <span>新建会话</span>
+            </button>
+
+            <div class="session-heading">
+                <span>会话</span>
+                <span id="session-count" class="session-count">0</span>
+            </div>
+            <nav id="session-list" class="session-list" aria-label="Agent 会话列表"></nav>
+
+            <div class="sidebar-footer">
+                <span class="runtime-dot" aria-hidden="true"></span>
+                <span id="runtime-status">本机运行时已连接</span>
+            </div>
+        </aside>
+
+        <section class="content-shell">
+            <header class="session-toolbar">
+                <div class="toolbar-leading">
+                    <button id="sidebar-open-button" class="icon-button sidebar-open" type="button" aria-label="打开导航" data-tooltip="打开导航">
+                        <i data-lucide="panel-left-open"></i>
+                    </button>
+                    <div class="session-identity">
+                        <div class="status-line">
+                            <span id="session-status-dot" class="status-dot status-idle" aria-hidden="true"></span>
+                            <span id="session-status" role="status">选择一个工作区以开始</span>
+                        </div>
+                        <h1 id="session-title">未选择会话</h1>
+                    </div>
+                </div>
+            </header>
+
+            <div class="workspace-grid">
+                <section class="conversation-panel" aria-label="Agent 对话">
+                    <section id="transcript" class="transcript" aria-live="polite" aria-label="会话记录">
+                        <div id="empty-state" class="empty-state">
+                            <div class="empty-glyph" aria-hidden="true"><i data-lucide="sparkles"></i></div>
+                            <h2>选择工作区，开始一个任务</h2>
+                            <p>每个会话都由本机 Claude Code 运行时处理。</p>
+                        </div>
+                    </section>
+
+                    <section id="interaction-dock" class="interaction-dock" hidden aria-live="assertive"></section>
+
+                    <form id="chat-form" class="composer">
+                        @Html.AntiForgeryToken()
+                        <div id="attachment-list" class="attachment-list" aria-live="polite"></div>
+                        <div class="composer-row">
+                            <label class="icon-button attachment-button" for="attachment-input" aria-label="添加图片" data-tooltip="添加图片">
+                                <i data-lucide="paperclip"></i>
+                            </label>
+                            <input id="attachment-input" type="file" accept="image/png,image/jpeg,image/gif,image/webp" multiple hidden />
+                            <textarea id="message-input" name="message" rows="1" maxlength="32000" placeholder="描述任务，或输入 / 使用原生命令与技能" disabled></textarea>
+                            <button id="send-button" class="send-button" type="submit" disabled>
+                                <i data-lucide="arrow-up"></i>
+                                <span class="sr-only">发送</span>
+                            </button>
+                        </div>
+                        <div class="composer-footer">
+                            <label class="composer-permission" for="permission-mode-select" data-tooltip="新会话权限模式">
+                                <i data-lucide="shield-check" aria-hidden="true"></i>
+                                <select id="permission-mode-select" aria-label="新会话权限模式">
+                                    <option value="default">手动</option>
+                                    <option value="acceptEdits">接受编辑</option>
+                                    <option value="plan">计划</option>
+                                    <option value="auto">自动</option>
+                                </select>
+                            </label>
+                            <div class="composer-model-controls">
+                                <label class="composer-select" for="thinking-level-select">
+                                    <span class="sr-only">思考等级</span>
+                                    <i data-lucide="brain-circuit" aria-hidden="true"></i>
+                                    <select id="thinking-level-select" aria-label="思考等级" disabled>
+                                        <option value="4096">低</option>
+                                        <option value="8192" selected>标准</option>
+                                        <option value="16384">高</option>
+                                    </select>
+                                </label>
+                                <label class="composer-select composer-model-select" for="model-select">
+                                    <span class="sr-only">模型</span>
+                                    <i data-lucide="sparkles" aria-hidden="true"></i>
+                                    <select id="model-select" aria-label="Claude 模型" disabled>
+                                        <option value="">正在加载模型</option>
+                                    </select>
+                                </label>
+                            </div>
+                        </div>
+                        <div id="command-menu" class="command-menu" hidden role="listbox" aria-label="可用命令"></div>
+                    </form>
+                </section>
+
+                <aside class="inspector" aria-label="会话检查器">
+                    <div class="inspector-tabs" role="tablist" aria-label="检查器视图">
+                        <button class="inspector-tab" type="button" role="tab" aria-selected="true" data-panel="activity-panel">活动</button>
+                        <button class="inspector-tab" type="button" role="tab" aria-selected="false" data-panel="changes-panel">变更</button>
+                    </div>
+                    <section id="activity-panel" class="inspector-panel" role="tabpanel">
+                        <ol id="activity-list" class="activity-list"></ol>
+                    </section>
+                    <section id="changes-panel" class="inspector-panel" role="tabpanel" hidden>
+                        <div id="changes-list" class="changes-list"></div>
+                    </section>
+                </aside>
+            </div>
+        </section>
+    </main>
+</body>
+</html>

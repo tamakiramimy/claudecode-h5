@@ -1,0 +1,9 @@
+gateway-settings.local.json
+appsettings.Local.json
+bin/
+obj/
+bridge/node_modules/
+.DS_Store
+.artifacts/
+agent-workspace/.claude/
+agent-workspace/*.png
