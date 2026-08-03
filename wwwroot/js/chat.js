@@ -23,6 +23,12 @@ const elements = {
     changesList: document.querySelector("#changes-list"),
     sidebarOpen: document.querySelector("#sidebar-open-button"),
     sidebarClose: document.querySelector("#sidebar-close-button"),
+    sessionContextMenu: document.querySelector("#session-context-menu"),
+    sessionRenameDialog: document.querySelector("#session-rename-dialog"),
+    sessionRenameForm: document.querySelector("#session-rename-form"),
+    sessionRenameInput: document.querySelector("#session-rename-input"),
+    sessionDeleteDialog: document.querySelector("#session-delete-dialog"),
+    sessionDeleteForm: document.querySelector("#session-delete-form"),
     csrfToken: document.querySelector("input[name='__RequestVerificationToken']")
 };
 
@@ -30,10 +36,63 @@ const state = {
     activeSessionId: null,
     attachments: [],
     eventSource: null,
+    history: new Map(),
+    historyWriteTimers: new Map(),
+    menuSessionId: null,
+    pendingDialogSessionId: null,
     settingsUpdate: Promise.resolve(),
     sessions: [],
     views: new Map(),
     workspaces: []
+};
+
+const historyDatabase = {
+    name: "claude-code-h5-history",
+    version: 1,
+    async open() {
+        if (!("indexedDB" in window)) {
+            return null;
+        }
+        return new Promise((resolve, reject) => {
+            const request = indexedDB.open(this.name, this.version);
+            request.onupgradeneeded = () => request.result.createObjectStore("sessions", { keyPath: "id" });
+            request.onsuccess = () => resolve(request.result);
+            request.onerror = () => reject(request.error);
+        });
+    },
+    async readAll() {
+        const database = await this.open();
+        if (!database) {
+            return [];
+        }
+        return new Promise((resolve, reject) => {
+            const request = database.transaction("sessions", "readonly").objectStore("sessions").getAll();
+            request.onsuccess = () => resolve(request.result || []);
+            request.onerror = () => reject(request.error);
+        });
+    },
+    async put(record) {
+        const database = await this.open();
+        if (!database) {
+            return;
+        }
+        await new Promise((resolve, reject) => {
+            const request = database.transaction("sessions", "readwrite").objectStore("sessions").put(record);
+            request.onsuccess = () => resolve();
+            request.onerror = () => reject(request.error);
+        });
+    },
+    async remove(id) {
+        const database = await this.open();
+        if (!database) {
+            return;
+        }
+        await new Promise((resolve, reject) => {
+            const request = database.transaction("sessions", "readwrite").objectStore("sessions").delete(id);
+            request.onsuccess = () => resolve();
+            request.onerror = () => reject(request.error);
+        });
+    }
 };
 
 const statusLabels = {
@@ -63,7 +122,9 @@ void initialize();
 async function initialize() {
     createIcons();
     bindEvents();
+    await loadHistory();
     await Promise.all([loadWorkspaces(), loadSessions()]);
+    reconcileHistory();
     if (state.sessions.length > 0) {
         selectSession(state.sessions[0].id);
     } else {
@@ -99,7 +160,40 @@ function bindEvents() {
     document.querySelectorAll(".inspector-tab").forEach((tab) => {
         tab.addEventListener("click", () => activateInspectorTab(tab));
     });
+    elements.sessionContextMenu.addEventListener("click", handleSessionContextAction);
+    elements.sessionRenameForm.addEventListener("submit", (event) => void submitSessionRename(event));
+    elements.sessionDeleteForm.addEventListener("submit", (event) => void submitSessionDelete(event));
+    document.querySelectorAll("[data-dialog-close]").forEach((button) => button.addEventListener("click", () => button.closest("dialog")?.close()));
+    document.addEventListener("click", (event) => {
+        if (!elements.sessionContextMenu.contains(event.target)) {
+            hideSessionContextMenu();
+        }
+    });
     window.addEventListener("beforeunload", () => closeEventSource());
+}
+
+async function loadHistory() {
+    try {
+        const records = await historyDatabase.readAll();
+        for (const record of records) {
+            state.history.set(record.id, record);
+        }
+    } catch (error) {
+        console.warn("Unable to load local conversation history.", error);
+    }
+}
+
+function reconcileHistory() {
+    const activeIds = new Set(state.sessions.map((session) => session.id));
+    for (const record of state.history.values()) {
+        if (activeIds.has(record.id)) {
+            restoreViewSnapshot(record.id, record.view);
+            continue;
+        }
+        state.sessions.push({ ...record.summary, id: record.id, isHistorical: true, status: record.summary.status || "stopped" });
+        restoreViewSnapshot(record.id, record.view);
+    }
+    state.sessions.sort((left, right) => new Date(right.updatedAt) - new Date(left.updatedAt));
 }
 
 async function loadWorkspaces() {
@@ -127,6 +221,13 @@ async function createSession() {
         return;
     }
 
+    const existing = findActiveUnisolatedSession(workspaceId);
+    if (existing) {
+        selectSession(existing.id);
+        showRuntimeError("该工作区已有活动会话，已切换到现有会话。");
+        return;
+    }
+
     setBusy(elements.newSessionButton, true);
     try {
         const session = await requestJson("/api/agent/sessions", {
@@ -140,6 +241,14 @@ async function createSession() {
         ensureView(session.id);
         selectSession(session.id);
     } catch (error) {
+        if (error.message.includes("non-isolated workspace")) {
+            const conflictingSession = findActiveUnisolatedSession(workspaceId);
+            if (conflictingSession) {
+                selectSession(conflictingSession.id);
+                showRuntimeError("该工作区已有活动会话，已切换到现有会话。");
+                return;
+            }
+        }
         showRuntimeError(error.message);
     } finally {
         setBusy(elements.newSessionButton, false);
@@ -151,11 +260,63 @@ function selectSession(sessionId) {
         return;
     }
 
+    const session = state.sessions.find((item) => item.id === sessionId);
+    if (session?.isHistorical) {
+        void restoreHistoricalSession(session);
+        return;
+    }
+
     state.activeSessionId = sessionId;
     ensureView(sessionId);
     elements.workbench.classList.remove("sidebar-visible");
     openEventStream(sessionId);
     render();
+}
+
+async function restoreHistoricalSession(historySession) {
+    if (!historySession.claudeSessionId) {
+        state.activeSessionId = historySession.id;
+        showRuntimeError("该历史会话没有 Claude session ID，只能查看，无法继续。" );
+        render();
+        return;
+    }
+
+    showRuntimeError("正在恢复历史会话…");
+    try {
+        const previousId = historySession.id;
+        const view = ensureView(previousId);
+        const restored = await requestJson("/api/agent/sessions/restore", {
+            method: "POST",
+            body: JSON.stringify({
+                workspaceId: historySession.workspaceId,
+                claudeSessionId: historySession.claudeSessionId,
+                name: historySession.name,
+                permissionMode: historySession.permissionMode,
+                model: view.model,
+                maxThinkingTokens: view.maxThinkingTokens
+            })
+        });
+        migrateHistorySession(previousId, restored.id, restored);
+        selectSession(restored.id);
+    } catch (error) {
+        state.activeSessionId = historySession.id;
+        showRuntimeError(`恢复失败：${error.message}`);
+        render();
+    }
+}
+
+function migrateHistorySession(previousId, nextId, summary) {
+    const view = state.views.get(previousId);
+    if (view) {
+        state.views.delete(previousId);
+        state.views.set(nextId, view);
+    }
+    state.history.delete(previousId);
+    void historyDatabase.remove(previousId);
+    state.sessions = state.sessions
+        .filter((session) => session.id !== previousId)
+        .concat({ ...summary, isHistorical: false });
+    scheduleHistorySave(nextId);
 }
 
 function openEventStream(sessionId) {
@@ -208,6 +369,7 @@ function handleSseEvent(sessionId, eventName, event) {
     }
     if (wrapped.sequence) {
         view.sequences.add(wrapped.sequence);
+        scheduleHistorySave(sessionId);
     }
 
     if (eventName === "event") {
@@ -1045,7 +1207,18 @@ function renderWorkspaceOptions() {
     if (state.workspaces.some((workspace) => workspace.id === selected)) {
         elements.workspaceSelect.value = selected;
     }
+    const existing = findActiveUnisolatedSession(elements.workspaceSelect.value);
     elements.newSessionButton.disabled = state.workspaces.length === 0;
+    elements.newSessionButton.title = existing ? "该非 Git 工作区已有活动会话，请继续现有会话。" : "新建会话";
+    elements.newSessionButton.querySelector("span").textContent = existing ? "继续现有会话" : "新建会话";
+}
+
+function findActiveUnisolatedSession(workspaceId) {
+    return state.sessions.find((session) =>
+        session.workspaceId === workspaceId &&
+        !session.isIsolated &&
+        !session.isHistorical &&
+        !["completed", "failed", "stopped"].includes(session.status));
 }
 
 function renderSessionList() {
@@ -1067,6 +1240,12 @@ function renderSessionList() {
         item.setAttribute("aria-current", session.id === state.activeSessionId ? "page" : "false");
         item.innerHTML = `<span class="session-item-dot status-${escapeHtml(session.status)}"></span><span class="session-item-copy"><strong>${escapeHtml(session.name)}</strong><small>${escapeHtml(statusLabels[session.status] || session.status)}</small></span>${session.isIsolated ? "<i data-lucide='git-branch' aria-hidden='true'></i>" : ""}`;
         item.addEventListener("click", () => selectSession(session.id));
+        item.addEventListener("contextmenu", (event) => showSessionContextMenu(event, session.id));
+        item.addEventListener("keydown", (event) => {
+            if (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10")) {
+                showSessionContextMenu(event, session.id);
+            }
+        });
         elements.sessionList.append(item);
     }
 }
@@ -1268,6 +1447,7 @@ function appendMessage(sessionId, role, text, key) {
     if (state.activeSessionId === sessionId) {
         renderTranscript();
     }
+    scheduleHistorySave(sessionId);
     return article;
 }
 
@@ -1283,6 +1463,165 @@ function appendActivity(sessionId, text, tone = "info") {
     }
     if (state.activeSessionId === sessionId) {
         renderActivity();
+    }
+    scheduleHistorySave(sessionId);
+}
+
+function scheduleHistorySave(sessionId) {
+    const session = state.sessions.find((item) => item.id === sessionId);
+    if (!session || session.isHistorical) {
+        return;
+    }
+    clearTimeout(state.historyWriteTimers.get(sessionId));
+    state.historyWriteTimers.set(sessionId, setTimeout(() => void persistHistorySession(sessionId), 250));
+}
+
+async function persistHistorySession(sessionId) {
+    const session = state.sessions.find((item) => item.id === sessionId);
+    const view = state.views.get(sessionId);
+    if (!session || !view) {
+        return;
+    }
+    const record = {
+        id: sessionId,
+        summary: { ...session, isHistorical: false },
+        updatedAt: new Date().toISOString(),
+        view: {
+            activities: view.activities.slice(-80),
+            commands: view.commands,
+            maxThinkingTokens: view.maxThinkingTokens,
+            messages: view.messages.map((message) => ({ role: message.role, text: message.element.textContent || "" })).slice(-300),
+            model: view.model,
+            models: view.models,
+            sequences: [...view.sequences]
+        }
+    };
+    state.history.set(sessionId, record);
+    try {
+        await historyDatabase.put(record);
+    } catch (error) {
+        console.warn("Unable to save local conversation history.", error);
+    }
+}
+
+function restoreViewSnapshot(sessionId, snapshot = {}) {
+    const view = ensureView(sessionId);
+    if (view.messages.length > 0 || !snapshot) {
+        return;
+    }
+    view.activities = Array.isArray(snapshot.activities) ? snapshot.activities : [];
+    view.commands = Array.isArray(snapshot.commands) ? snapshot.commands : [];
+    view.maxThinkingTokens = snapshot.maxThinkingTokens || view.maxThinkingTokens;
+    view.model = snapshot.model || null;
+    view.models = Array.isArray(snapshot.models) ? snapshot.models : [];
+    view.sequences = new Set(Array.isArray(snapshot.sequences) ? snapshot.sequences : []);
+    for (const message of snapshot.messages || []) {
+        const role = message.role || "agent";
+        const text = message.text || "";
+        if (view.messages.some((existing) => existing.role === role && existing.element.textContent === text)) {
+            continue;
+        }
+        const article = document.createElement("article");
+        article.className = `message message-${role}`;
+        article.textContent = text;
+        const key = `history-${crypto.randomUUID()}`;
+        view.messages.push({ key, role, element: article });
+        view.messageKeys.add(key);
+    }
+}
+
+function showSessionContextMenu(event, sessionId) {
+    event.preventDefault();
+    state.menuSessionId = sessionId;
+    const menu = elements.sessionContextMenu;
+    menu.hidden = false;
+    menu.style.left = `${Math.min(event.clientX, window.innerWidth - 190)}px`;
+    menu.style.top = `${Math.min(event.clientY, window.innerHeight - 100)}px`;
+}
+
+function hideSessionContextMenu() {
+    elements.sessionContextMenu.hidden = true;
+    state.menuSessionId = null;
+}
+
+function handleSessionContextAction(event) {
+    const action = event.target.closest("[data-session-action]")?.dataset.sessionAction;
+    const session = state.sessions.find((item) => item.id === state.menuSessionId);
+    hideSessionContextMenu();
+    if (!action || !session) {
+        return;
+    }
+    state.pendingDialogSessionId = session.id;
+    if (action === "rename") {
+        elements.sessionRenameInput.value = session.name;
+        elements.sessionRenameDialog.showModal();
+        elements.sessionRenameInput.focus();
+        elements.sessionRenameInput.select();
+        return;
+    }
+    elements.sessionDeleteDialog.showModal();
+}
+
+async function submitSessionRename(event) {
+    event.preventDefault();
+    const session = state.sessions.find((item) => item.id === state.pendingDialogSessionId);
+    const name = elements.sessionRenameInput.value.trim();
+    if (!session || !name) {
+        return;
+    }
+    try {
+        let updated = { ...session, name };
+        if (session.isHistorical) {
+            const record = state.history.get(session.id);
+            if (record) {
+                const renamedRecord = {
+                    ...record,
+                    summary: { ...record.summary, name },
+                    updatedAt: new Date().toISOString()
+                };
+                state.history.set(session.id, renamedRecord);
+                await historyDatabase.put(renamedRecord);
+            }
+        } else {
+            updated = await requestJson(`/api/agent/sessions/${encodeURIComponent(session.id)}`, {
+                method: "PATCH",
+                body: JSON.stringify({ name })
+            });
+        }
+        updateSession(session.id, updated);
+        elements.sessionRenameDialog.close();
+        render();
+    } catch (error) {
+        showRuntimeError(error.message);
+    }
+}
+
+async function submitSessionDelete(event) {
+    event.preventDefault();
+    const session = state.sessions.find((item) => item.id === state.pendingDialogSessionId);
+    if (!session) {
+        return;
+    }
+    try {
+        if (!session.isHistorical) {
+            await requestJson(`/api/agent/sessions/${encodeURIComponent(session.id)}`, { method: "DELETE" });
+        }
+        clearTimeout(state.historyWriteTimers.get(session.id));
+        state.history.delete(session.id);
+        state.views.delete(session.id);
+        await historyDatabase.remove(session.id);
+        state.sessions = state.sessions.filter((item) => item.id !== session.id);
+        if (state.activeSessionId === session.id) {
+            closeEventSource();
+            state.activeSessionId = state.sessions[0]?.id || null;
+            if (state.activeSessionId) {
+                selectSession(state.activeSessionId);
+            }
+        }
+        elements.sessionDeleteDialog.close();
+        render();
+    } catch (error) {
+        showRuntimeError(error.message);
     }
 }
 
@@ -1329,6 +1668,7 @@ function activeSession() {
 
 function updateSession(sessionId, patch) {
     state.sessions = state.sessions.map((session) => session.id === sessionId ? { ...session, ...patch } : session);
+    scheduleHistorySave(sessionId);
 }
 
 function updateSessionStatus(sessionId, status) {

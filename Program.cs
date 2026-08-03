@@ -42,6 +42,9 @@ app.MapGet("/api/workspaces", ListWorkspacesAsync);
 app.MapGet("/api/agent/sessions", ListAgentSessionsAsync);
 app.MapGet("/api/agent/sessions/{sessionId}/events", StreamAgentEventsAsync);
 app.MapPost("/api/agent/sessions", CreateAgentSessionAsync);
+app.MapPost("/api/agent/sessions/restore", RestoreAgentSessionAsync);
+app.MapPatch("/api/agent/sessions/{sessionId}", RenameAgentSessionAsync);
+app.MapDelete("/api/agent/sessions/{sessionId}", DeleteAgentSessionAsync);
 app.MapPost("/api/agent/sessions/{sessionId}/prompts", QueueAgentPromptAsync);
 app.MapPost("/api/agent/sessions/{sessionId}/interrupt", InterruptAgentSessionAsync);
 app.MapPost("/api/agent/sessions/{sessionId}/settings", ConfigureAgentSessionAsync);
@@ -181,6 +184,87 @@ static async Task<IResult> QueueAgentPromptAsync(
     catch (ArgumentException exception)
     {
         return Results.BadRequest(new { error = exception.Message });
+    }
+    catch (KeyNotFoundException exception)
+    {
+        return Results.NotFound(new { error = exception.Message });
+    }
+}
+
+static async Task<IResult> RestoreAgentSessionAsync(
+    HttpContext context,
+    AgentSessionRestoreRequest request,
+    AgentSessionManager sessions,
+    IAntiforgery antiforgery,
+    CancellationToken cancellationToken)
+{
+    if (!await IsAntiforgeryValidAsync(context, antiforgery))
+    {
+        return Results.BadRequest(new { error = "The antiforgery token is missing or invalid." });
+    }
+
+    try
+    {
+        context.Session.SetString("ClaudeCodeChat", "active");
+        var session = await sessions.RestoreAsync(context.Session.Id, request, cancellationToken);
+        return Results.Created($"/api/agent/sessions/{session.Id}", session);
+    }
+    catch (ArgumentException exception)
+    {
+        return Results.BadRequest(new { error = exception.Message });
+    }
+    catch (KeyNotFoundException exception)
+    {
+        return Results.NotFound(new { error = exception.Message });
+    }
+    catch (InvalidOperationException exception)
+    {
+        return Results.Conflict(new { error = exception.Message });
+    }
+}
+
+static async Task<IResult> RenameAgentSessionAsync(
+    HttpContext context,
+    string sessionId,
+    AgentSessionRenameRequest request,
+    AgentSessionManager sessions,
+    IAntiforgery antiforgery)
+{
+    if (!await IsAntiforgeryValidAsync(context, antiforgery))
+    {
+        return Results.BadRequest(new { error = "The antiforgery token is missing or invalid." });
+    }
+
+    try
+    {
+        return Results.Ok(sessions.Rename(context.Session.Id, sessionId, request));
+    }
+    catch (ArgumentException exception)
+    {
+        return Results.BadRequest(new { error = exception.Message });
+    }
+    catch (KeyNotFoundException exception)
+    {
+        return Results.NotFound(new { error = exception.Message });
+    }
+}
+
+static async Task<IResult> DeleteAgentSessionAsync(
+    HttpContext context,
+    string sessionId,
+    AgentSessionManager sessions,
+    IAntiforgery antiforgery,
+    CancellationToken cancellationToken)
+{
+    if (!await IsAntiforgeryValidAsync(context, antiforgery))
+    {
+        return Results.BadRequest(new { error = "The antiforgery token is missing or invalid." });
+    }
+
+    try
+    {
+        await sessions.DeleteAsync(context.Session.Id, sessionId, cancellationToken);
+        return Results.NoContent();
     }
     catch (KeyNotFoundException exception)
     {

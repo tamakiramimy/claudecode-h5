@@ -45,6 +45,11 @@
             </div>
             <nav id="session-list" class="session-list" aria-label="Agent 会话列表"></nav>
 
+            <div id="session-context-menu" class="session-context-menu" hidden role="menu" aria-label="会话操作">
+                <button type="button" role="menuitem" data-session-action="rename"><i data-lucide="pencil"></i><span>重命名</span></button>
+                <button type="button" role="menuitem" data-session-action="delete"><i data-lucide="trash-2"></i><span>删除 H5 历史</span></button>
+            </div>
+
             <div class="sidebar-footer">
                 <span class="runtime-dot" aria-hidden="true"></span>
                 <span id="runtime-status">本机运行时已连接</span>
@@ -141,5 +146,28 @@
             </div>
         </section>
     </main>
+
+    <dialog id="session-rename-dialog" class="session-dialog" aria-labelledby="session-rename-title">
+        <form method="dialog" id="session-rename-form">
+            <h2 id="session-rename-title">重命名会话</h2>
+            <label for="session-rename-input">名称</label>
+            <input id="session-rename-input" maxlength="120" required />
+            <div class="session-dialog-actions">
+                <button type="button" class="button button-secondary" data-dialog-close>取消</button>
+                <button type="submit" class="button button-primary">保存</button>
+            </div>
+        </form>
+    </dialog>
+
+    <dialog id="session-delete-dialog" class="session-dialog" aria-labelledby="session-delete-title">
+        <form method="dialog" id="session-delete-form">
+            <h2 id="session-delete-title">删除 H5 会话历史？</h2>
+            <p>这只会删除本浏览器中的 H5 会话记录，并关闭仍在运行的 Agent。不会删除 Claude 原生记录、工作区文件或 Git worktree。</p>
+            <div class="session-dialog-actions">
+                <button type="button" class="button button-secondary" data-dialog-close>取消</button>
+                <button type="submit" class="button button-danger">删除</button>
+            </div>
+        </form>
+    </dialog>
 </body>
 </html>

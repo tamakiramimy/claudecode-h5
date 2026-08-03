@@ -97,6 +97,83 @@ public sealed class AgentSessionManager(
         }
     }
 
+    public async Task<AgentSessionSummary> RestoreAsync(
+        string browserSessionId,
+        AgentSessionRestoreRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(request.WorkspaceId) || string.IsNullOrWhiteSpace(request.ClaudeSessionId))
+        {
+            throw new ArgumentException("WorkspaceId and ClaudeSessionId are required.", nameof(request));
+        }
+
+        if (GetActiveSessionCount(browserSessionId) >= Math.Clamp(_options.MaxConcurrentSessions, 1, 16))
+        {
+            throw new InvalidOperationException("The configured concurrent Agent session limit has been reached.");
+        }
+
+        var workspace = workspaces.GetRequired(request.WorkspaceId);
+        var permissionMode = NormalizePermissionMode(request.PermissionMode);
+        var model = NormalizeModel(request.Model);
+        var thinkingTokens = NormalizeThinkingTokens(request.MaxThinkingTokens) ?? DefaultThinkingTokens;
+        EnsureNonGitWorkspaceIsAvailable(browserSessionId, workspace.Summary.Id, workspace.Summary.IsGitRepository);
+
+        var sessionId = Guid.NewGuid().ToString("N");
+        var allocation = await worktrees.AllocateAsync(
+            workspace.Path,
+            sessionId,
+            _options.EnableWorktreeIsolation,
+            cancellationToken);
+        var now = DateTimeOffset.UtcNow;
+        var summary = new AgentSessionSummary(
+            sessionId,
+            NormalizeName(request.Name, workspace.Summary.Name),
+            workspace.Summary.Id,
+            workspace.Summary.Name,
+            "starting",
+            permissionMode,
+            now,
+            now,
+            allocation.IsIsolated,
+            allocation.WorktreePath,
+            request.ClaudeSessionId.Trim());
+        var managedSession = new ManagedAgentSession(browserSessionId, summary, allocation.WorkingDirectory)
+        {
+            Model = model,
+            MaxThinkingTokens = thinkingTokens
+        };
+        if (!_sessions.TryAdd(sessionId, managedSession))
+        {
+            throw new InvalidOperationException("Unable to restore the Agent session.");
+        }
+
+        try
+        {
+            await bridgeClient.StartSessionAsync(
+                new AgentBridgeStartRequest(
+                    SessionId: sessionId,
+                    WorkspacePath: allocation.WorkingDirectory,
+                    PermissionMode: permissionMode,
+                    ResumeSessionId: summary.ClaudeSessionId,
+                    Model: model,
+                    MaxThinkingTokens: thinkingTokens),
+                message => HandleBridgeMessageAsync(managedSession, message),
+                cancellationToken);
+            Publish(managedSession, "session-restored", JsonSerializer.SerializeToElement(new
+            {
+                previousClaudeSessionId = summary.ClaudeSessionId,
+                summary = managedSession.Summary
+            }));
+            return managedSession.Summary;
+        }
+        catch (Exception exception)
+        {
+            _sessions.TryRemove(sessionId, out _);
+            logger.LogWarning(exception, "Unable to restore Agent session {ClaudeSessionId}", request.ClaudeSessionId);
+            throw;
+        }
+    }
+
     public async Task QueuePromptAsync(
         string browserSessionId,
         string sessionId,
@@ -208,6 +285,40 @@ public sealed class AgentSessionManager(
         await bridgeClient.CloseSessionAsync(sessionId, cancellationToken);
         UpdateSummary(session, summary => summary with { Status = "stopped" });
         Publish(session, "session-stopped", JsonSerializer.SerializeToElement(new { }));
+    }
+
+    public AgentSessionSummary Rename(string browserSessionId, string sessionId, AgentSessionRenameRequest request)
+    {
+        if (string.IsNullOrWhiteSpace(request.Name))
+        {
+            throw new ArgumentException("Name is required.", nameof(request));
+        }
+
+        var session = GetOwnedSession(browserSessionId, sessionId);
+        var name = request.Name.Trim();
+        if (name.Length > 120)
+        {
+            throw new ArgumentException("Name must contain at most 120 characters.", nameof(request));
+        }
+
+        UpdateSummary(session, summary => summary with { Name = name });
+        Publish(session, "session-renamed", JsonSerializer.SerializeToElement(new { name }));
+        return session.Summary;
+    }
+
+    public async Task DeleteAsync(string browserSessionId, string sessionId, CancellationToken cancellationToken)
+    {
+        var session = GetOwnedSession(browserSessionId, sessionId);
+        try
+        {
+            await bridgeClient.CloseSessionAsync(sessionId, cancellationToken);
+        }
+        catch (Exception exception)
+        {
+            logger.LogDebug(exception, "Agent Bridge did not confirm closure for deleted session {SessionId}", sessionId);
+        }
+
+        _sessions.TryRemove(session.Summary.Id, out _);
     }
 
     public async IAsyncEnumerable<AgentSessionEvent> StreamAsync(

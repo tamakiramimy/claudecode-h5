@@ -5,5 +5,6 @@ obj/
 bridge/node_modules/
 .DS_Store
 .artifacts/
+/.claude/worktrees/
 agent-workspace/.claude/
 agent-workspace/*.png
