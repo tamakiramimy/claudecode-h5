@@ -119,7 +119,8 @@ public sealed class AgentBridgeClient(
             ["type"] = "configure",
             ["sessionId"] = sessionId,
             ["model"] = settings.Model,
-            ["maxThinkingTokens"] = settings.MaxThinkingTokens
+            ["maxThinkingTokens"] = settings.MaxThinkingTokens,
+            ["permissionMode"] = settings.PermissionMode
         }, cancellationToken);
 
     public Task RespondToRequestAsync(

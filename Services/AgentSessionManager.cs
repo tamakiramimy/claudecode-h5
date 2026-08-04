@@ -15,8 +15,8 @@ public sealed class AgentSessionManager(
     ILogger<AgentSessionManager> logger)
 {
     private const int DefaultThinkingTokens = 8_192;
-    private static readonly HashSet<string> AllowedPermissionModes = ["default", "acceptEdits", "auto", "plan"];
-    private static readonly HashSet<int> AllowedThinkingTokenBudgets = [4_096, 8_192, 16_384];
+    private static readonly HashSet<string> AllowedPermissionModes = ["default", "acceptEdits", "plan", "bypassPermissions"];
+    private static readonly HashSet<int> AllowedThinkingTokenBudgets = [4_096, 8_192, 16_384, 32_768, 65_536, 131_072];
     private static readonly HashSet<string> AllowedImageMediaTypes = ["image/gif", "image/jpeg", "image/png", "image/webp"];
     private readonly ClaudeCodeOptions _options = options.Value;
     private readonly ConcurrentDictionary<string, ManagedAgentSession> _sessions = new();
@@ -240,20 +240,26 @@ public sealed class AgentSessionManager(
 
         var model = NormalizeModel(settings.Model);
         var thinkingTokens = NormalizeThinkingTokens(settings.MaxThinkingTokens);
+        var permissionMode = settings.PermissionMode is null ? null : NormalizePermissionMode(settings.PermissionMode);
         await bridgeClient.ConfigureSessionAsync(
             sessionId,
-            new AgentSessionSettingsRequest(model, thinkingTokens),
+            new AgentSessionSettingsRequest(model, thinkingTokens, permissionMode),
             cancellationToken);
 
         lock (session.SyncRoot)
         {
-            session.Model = model ?? session.Model;
+            session.Model = model;
             session.MaxThinkingTokens = thinkingTokens ?? session.MaxThinkingTokens;
+        }
+        if (permissionMode is not null)
+        {
+            UpdateSummary(session, summary => summary with { PermissionMode = permissionMode, Status = "idle" });
         }
         Publish(session, "session-settings-updated", JsonSerializer.SerializeToElement(new
         {
             model = session.Model,
-            maxThinkingTokens = session.MaxThinkingTokens
+            maxThinkingTokens = session.MaxThinkingTokens,
+            permissionMode = session.Summary.PermissionMode
         }));
     }
 
@@ -439,7 +445,6 @@ public sealed class AgentSessionManager(
             {
                 "idle" => "idle",
                 "requires_action" => "needs-input",
-                "running" => "working",
                 _ => null
             };
             if (status is not null)
@@ -572,9 +577,13 @@ public sealed class AgentSessionManager(
     private static string NormalizePermissionMode(string? permissionMode)
     {
         var normalized = string.IsNullOrWhiteSpace(permissionMode) ? "default" : permissionMode.Trim();
+        if (string.Equals(normalized, "auto", StringComparison.Ordinal))
+        {
+            normalized = "bypassPermissions";
+        }
         if (!AllowedPermissionModes.Contains(normalized))
         {
-            throw new ArgumentException("Permission mode must be default, acceptEdits, auto, or plan.", nameof(permissionMode));
+            throw new ArgumentException("Permission mode must be default, acceptEdits, plan, or bypassPermissions.", nameof(permissionMode));
         }
 
         return normalized;

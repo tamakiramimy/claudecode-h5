@@ -99,23 +99,26 @@
                             </button>
                         </div>
                         <div class="composer-footer">
-                            <label class="composer-permission" for="permission-mode-select" data-tooltip="新会话权限模式">
+                            <label class="composer-permission" for="permission-mode-select" data-tooltip="Mode">
                                 <i data-lucide="shield-check" aria-hidden="true"></i>
-                                <select id="permission-mode-select" aria-label="新会话权限模式">
-                                    <option value="default">手动</option>
-                                    <option value="acceptEdits">接受编辑</option>
-                                    <option value="plan">计划</option>
-                                    <option value="auto">自动</option>
+                                <select id="permission-mode-select" aria-label="Mode">
+                                    <option value="default">Manual</option>
+                                    <option value="acceptEdits">Accept edits</option>
+                                    <option value="plan">Plan</option>
+                                    <option value="bypassPermissions">Bypass permissions</option>
                                 </select>
                             </label>
                             <div class="composer-model-controls">
                                 <label class="composer-select" for="thinking-level-select">
-                                    <span class="sr-only">思考等级</span>
+                                    <span class="sr-only">Effort</span>
                                     <i data-lucide="brain-circuit" aria-hidden="true"></i>
-                                    <select id="thinking-level-select" aria-label="思考等级" disabled>
-                                        <option value="4096">低</option>
-                                        <option value="8192" selected>标准</option>
-                                        <option value="16384">高</option>
+                                    <select id="thinking-level-select" aria-label="Effort" disabled>
+                                        <option value="4096">Low</option>
+                                        <option value="8192" selected>Medium</option>
+                                        <option value="16384">High</option>
+                                        <option value="32768">Extra</option>
+                                        <option value="65536">Max</option>
+                                        <option value="131072">Ultracode</option>
                                     </select>
                                 </label>
                                 <label class="composer-select composer-model-select" for="model-select">

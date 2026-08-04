@@ -157,6 +157,7 @@ function bindEvents() {
     elements.attachmentInput.addEventListener("change", () => void addAttachments(elements.attachmentInput.files));
     elements.modelSelect.addEventListener("change", () => void updateSessionSettings({ model: elements.modelSelect.value }));
     elements.thinkingLevel.addEventListener("change", () => void updateSessionSettings({ maxThinkingTokens: Number(elements.thinkingLevel.value) }));
+    elements.permissionMode.addEventListener("change", () => void updateSessionSettings({ permissionMode: elements.permissionMode.value }));
     document.querySelectorAll(".inspector-tab").forEach((tab) => {
         tab.addEventListener("click", () => activateInspectorTab(tab));
     });
@@ -409,7 +410,12 @@ function handleSseEvent(sessionId, eventName, event) {
         if (Number.isInteger(wrapped.payload.maxThinkingTokens)) {
             view.maxThinkingTokens = wrapped.payload.maxThinkingTokens;
         }
-        appendActivity(sessionId, "已更新模型或思考等级", "complete");
+        if (wrapped.payload.permissionMode) {
+            updateSession(sessionId, { permissionMode: wrapped.payload.permissionMode });
+        }
+        view.isConfiguring = false;
+        updateSessionStatus(sessionId, "idle");
+        appendActivity(sessionId, "已更新 Mode、模型或 Effort", "complete");
     } else if (eventName === "error") {
         appendMessage(sessionId, "error", wrapped.payload.error || "会话流发生错误。", `error-${wrapped.sequence || Date.now()}`);
     }
@@ -455,7 +461,12 @@ function handleBridgeEvent(sessionId, bridgePayload) {
             }
             break;
         case "session_state_changed":
-            updateSessionStatus(sessionId, mapAgentState(payload.state));
+            {
+                const status = mapAgentState(payload.state);
+                if (status) {
+                    updateSessionStatus(sessionId, status);
+                }
+            }
             break;
         case "stream_event":
             handlePartialEvent(sessionId, payload);
@@ -559,6 +570,10 @@ function markWorking(sessionId, kind) {
         return;
     }
 
+    const view = ensureView(sessionId);
+    if (view.isConfiguring) {
+        return;
+    }
     const session = state.sessions.find((item) => item.id === sessionId);
     if (session && !["needs-input", "stopping", "stopped", "completed", "failed"].includes(session.status)) {
         updateSessionStatus(sessionId, "working");
@@ -878,15 +893,14 @@ async function handleComposerSettingsCommand(session, message) {
     const thinkingTokens = {
         low: 4096,
         medium: 8192,
-        standard: 8192,
         high: 16384,
-        低: 4096,
-        标准: 8192,
-        高: 16384
+        extra: 32768,
+        max: 65536,
+        ultracode: 131072
     }[argument.toLowerCase()];
     if (!thinkingTokens) {
         elements.thinkingLevel.focus();
-        appendActivity(session.id, "思考等级：低、标准、高", "info");
+        appendActivity(session.id, "Effort：Low、Medium、High、Extra、Max、Ultracode", "info");
         return true;
     }
 
@@ -1338,10 +1352,13 @@ function renderComposer() {
     elements.input.disabled = disabled;
     elements.sendButton.disabled = disabled || isStopping;
     elements.attachmentInput.disabled = disabled;
-    elements.permissionMode.disabled = Boolean(session && !isTerminal && session.status !== "idle");
+    elements.permissionMode.disabled = !canConfigure;
     elements.modelSelect.disabled = !canConfigure;
     elements.thinkingLevel.disabled = !canConfigure;
     renderModelOptions(session);
+    if (session?.permissionMode) {
+        elements.permissionMode.value = session.permissionMode;
+    }
     elements.sendButton.dataset.action = isRunning ? "interrupt" : "send";
     elements.sendButton.type = isRunning ? "button" : "submit";
     elements.sendButton.classList.toggle("is-stop", Boolean(isRunning || isStopping));
@@ -1400,19 +1417,24 @@ async function applySessionSettings(patch) {
     const view = ensureView(session.id);
     const model = patch.model ?? view.model ?? null;
     const maxThinkingTokens = patch.maxThinkingTokens ?? view.maxThinkingTokens ?? 8192;
+    const permissionMode = patch.permissionMode ?? session.permissionMode;
+    view.isConfiguring = true;
     setBusy(elements.modelSelect, true);
     setBusy(elements.thinkingLevel, true);
+    setBusy(elements.permissionMode, true);
     try {
         await requestJson(`/api/agent/sessions/${encodeURIComponent(session.id)}/settings`, {
             method: "POST",
-            body: JSON.stringify({ model, maxThinkingTokens })
+            body: JSON.stringify({ model, maxThinkingTokens, permissionMode })
         });
-        view.model = model || view.model;
+        view.model = model;
         view.maxThinkingTokens = maxThinkingTokens;
-        appendActivity(session.id, "已应用模型与思考等级", "complete");
+        updateSession(session.id, { permissionMode, status: "idle" });
+        appendActivity(session.id, "已应用 Mode、模型与 Effort", "complete");
     } catch (error) {
         appendMessage(session.id, "error", error.message, `settings-${Date.now()}`);
     } finally {
+        view.isConfiguring = false;
         render();
     }
 }
@@ -1654,6 +1676,7 @@ function ensureView(sessionId) {
             messages: [],
             model: null,
             models: [],
+            isConfiguring: false,
             pendingRequest: null,
             sequences: new Set(),
             toolCardsByUseId: new Map()
@@ -1678,9 +1701,8 @@ function updateSessionStatus(sessionId, status) {
 function mapAgentState(stateName) {
     return {
         idle: "idle",
-        requires_action: "needs-input",
-        running: "working"
-    }[stateName] || "working";
+        requires_action: "needs-input"
+    }[stateName] || null;
 }
 
 async function requestJson(url, options = {}) {

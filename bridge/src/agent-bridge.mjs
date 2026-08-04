@@ -12,7 +12,7 @@ const IMAGE_MEDIA_TYPES = new Set([
     "image/png",
     "image/webp"
 ]);
-const PERMISSION_MODES = new Set(["default", "acceptEdits", "auto", "plan"]);
+const PERMISSION_MODES = new Set(["default", "acceptEdits", "plan", "bypassPermissions"]);
 const sessions = new Map();
 
 class AsyncQueue {
@@ -148,6 +148,7 @@ async function startSession(command) {
         includePartialMessages: true,
         pathToClaudeCodeExecutable: executablePath,
         permissionMode,
+        allowDangerouslySkipPermissions: true,
         canUseTool: (toolName, toolInput, requestOptions) => requestPermission(session, toolName, toolInput, requestOptions)
     };
 
@@ -249,13 +250,20 @@ async function configureSession(command) {
     if (maxThinkingTokens) {
         await session.query.setMaxThinkingTokens(maxThinkingTokens);
     }
+    const permissionMode = typeof command.permissionMode === "string" && command.permissionMode.trim()
+        ? normalizePermissionMode(command.permissionMode)
+        : null;
+    if (permissionMode) {
+        await session.query.setPermissionMode(permissionMode);
+    }
 
     emit({
         type: "configured",
         commandId: command.commandId,
         sessionId: session.id,
         model,
-        maxThinkingTokens
+        maxThinkingTokens,
+        permissionMode
     });
 }
 

@@ -8,7 +8,7 @@
 - 原生 Claude Code 会话、工具、技能、MCP、项目指令与权限回调。
 - 会话恢复：已结束或停止的会话可用原始 Claude session ID 继续上下文。
 - `/` 命令与技能菜单；命令清单在新会话建立后主动从 SDK 加载。
-- 模型与思考等级选择，以及 `/model`、`/effort` 快捷命令。
+- 模型选择、Claude Desktop 对应的 Mode（`Manual`、`Accept edits`、`Plan`、`Bypass permissions`）与 Effort（`Low`、`Medium`、`High`、`Extra`、`Max`、`Ultracode`），以及 `/model`、`/effort` 快捷命令。
 - 图片选择和剪贴板粘贴；每条消息最多 5 张图片、单张最大 10 MB。
 - 流式答复、可展开工具调用与结果、变更面板、活动面板。
 - 可折叠的“思考与执行过程”摘要，展示任务分析、工具调用、子任务、权限等待和结果状态；SDK 返回 thinking 增量时也会显示对应内容。
