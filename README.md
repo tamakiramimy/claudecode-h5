@@ -2,6 +2,18 @@
 
 claudecodeh5 是本地运行的 .NET 8 Razor Pages Agent 工作台。它通过 Node Bridge 调用 `@anthropic-ai/claude-agent-sdk`，并由本机 Claude Code CLI 执行真实 Agent 会话。浏览器不会获得 API 密钥、网关配置或 Claude 会话 ID。
 
+## 核心功能预览
+
+**会话工作台**：集中展示会话列表、任务输入、模型与权限控制，以及活动和变更面板。
+
+![claudecodeh5 会话工作台](docs/images/workbench-overview.png)
+
+**工作区管理**：支持在本地与服务端工作区之间切换，并可添加已有目录或创建新工作区。
+
+<p align="center">
+	<img src="docs/images/workspace-management.png" alt="claudecodeh5 工作区管理" width="540" />
+</p>
+
 ## 文档
 
 - [使用说明](docs/USAGE.md)：首次运行、工作区、会话和常见问题。
