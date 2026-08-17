@@ -1,0 +1,253 @@
+@page
+@{
+    Layout = null;
+    ViewData["Title"] = "claudecodeh5";
+}
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>@ViewData["Title"]</title>
+    <script src="https://unpkg.com/lucide@0.468.0/dist/umd/lucide.min.js" defer></script>
+    <link rel="stylesheet" href="~/css/site.css" />
+    <script src="~/js/chat.js" defer></script>
+</head>
+<body>
+    <main class="workbench" id="workbench">
+        <aside class="sidebar" id="sidebar" aria-label="会话导航">
+            <div class="sidebar-topline">
+                <a class="brand" href="/" aria-label="claudecodeh5">
+                    <span class="brand-mark" aria-hidden="true"><i data-lucide="bot"></i></span>
+                    <span class="brand-copy">
+                        <strong>claudecodeh5</strong>
+                        <small>Agent 工作台</small>
+                    </span>
+                </a>
+                <button id="sidebar-close-button" class="icon-button sidebar-close" type="button" aria-label="关闭导航" data-tooltip="关闭导航">
+                    <i data-lucide="panel-left-close"></i>
+                </button>
+            </div>
+
+            <div class="workspace-control">
+                <div class="workspace-control-heading">
+                    <span class="workspace-control-label">工作区</span>
+                    <button id="workspace-manage-button" class="icon-button workspace-manage-button" type="button" aria-label="管理工作区" data-tooltip="管理工作区">
+                        <i data-lucide="folder-plus"></i>
+                    </button>
+                </div>
+            </div>
+
+            <button id="new-session-button" class="new-session-button" type="button">
+                <i data-lucide="square-pen"></i>
+                <span>新建会话</span>
+            </button>
+
+            <div class="session-heading">
+                <span>会话</span>
+                <span id="session-count" class="session-count">0</span>
+            </div>
+            <nav id="session-list" class="session-list" aria-label="Agent 会话列表"></nav>
+
+            <div id="session-context-menu" class="session-context-menu" hidden role="menu" aria-label="会话操作">
+                <button type="button" role="menuitem" data-session-action="rename"><i data-lucide="pencil"></i><span>重命名</span></button>
+                <button type="button" role="menuitem" data-session-action="delete"><i data-lucide="trash-2"></i><span>删除 H5 历史</span></button>
+            </div>
+
+            <div class="sidebar-footer">
+                <span class="runtime-dot" aria-hidden="true"></span>
+                <span id="runtime-status">本机运行时已连接</span>
+            </div>
+        </aside>
+
+        <section class="content-shell">
+            <header class="session-toolbar">
+                <div class="toolbar-leading">
+                    <button id="sidebar-open-button" class="icon-button sidebar-open" type="button" aria-label="打开导航" data-tooltip="打开导航">
+                        <i data-lucide="panel-left-open"></i>
+                    </button>
+                    <div class="session-identity">
+                        <div class="status-line">
+                            <span id="session-status-dot" class="status-dot status-idle" aria-hidden="true"></span>
+                            <span id="session-status" role="status">选择一个工作区以开始</span>
+                        </div>
+                        <h1 id="session-title">未选择会话</h1>
+                    </div>
+                </div>
+
+            </header>
+
+            <div class="workspace-grid">
+                <section class="conversation-panel" aria-label="Agent 对话">
+                    <section id="transcript" class="transcript" aria-live="polite" aria-label="会话记录">
+                        <div id="empty-state" class="empty-state">
+                            <div class="empty-glyph" aria-hidden="true"><i data-lucide="sparkles"></i></div>
+                            <h2>选择工作区，开始一个任务</h2>
+                            <p>每个会话都由本机 Claude Code 运行时处理。</p>
+                        </div>
+                    </section>
+
+                    <section id="interaction-dock" class="interaction-dock" hidden aria-live="assertive"></section>
+
+                    <form id="chat-form" class="composer">
+                        @Html.AntiForgeryToken()
+                        <div id="attachment-list" class="attachment-list" aria-live="polite"></div>
+                        <div class="composer-row">
+                            <label class="icon-button attachment-button" for="attachment-input" aria-label="添加图片" data-tooltip="添加图片">
+                                <i data-lucide="paperclip"></i>
+                            </label>
+                            <input id="attachment-input" type="file" accept="image/png,image/jpeg,image/gif,image/webp" multiple hidden />
+                            <textarea id="message-input" name="message" rows="1" maxlength="32000" placeholder="描述任务，或输入 / 使用原生命令与技能" disabled></textarea>
+                            <button id="send-button" class="send-button" type="submit" disabled>
+                                <i data-lucide="arrow-up"></i>
+                                <span class="sr-only">发送</span>
+                            </button>
+                        </div>
+                        <div class="composer-footer">
+                            <label id="chat-workspace-control" class="composer-permission" for="chat-workspace-select" data-tooltip="关联工作区">
+                                <i data-lucide="folder-open" aria-hidden="true"></i>
+                                <select id="chat-workspace-select" aria-label="关联工作区" disabled>
+                                    <option value="">暂无工作区</option>
+                                </select>
+                            </label>
+                            <label class="composer-permission" for="permission-mode-select" data-tooltip="Mode">
+                                <i data-lucide="shield-check" aria-hidden="true"></i>
+                                <select id="permission-mode-select" aria-label="Mode">
+                                    <option value="default">Manual</option>
+                                    <option value="acceptEdits">Accept edits</option>
+                                    <option value="plan">Plan</option>
+                                    <option value="bypassPermissions">Bypass permissions</option>
+                                </select>
+                            </label>
+                            <div class="composer-model-controls">
+                                <label class="composer-select" for="thinking-level-select">
+                                    <span class="sr-only">Effort</span>
+                                    <i data-lucide="brain-circuit" aria-hidden="true"></i>
+                                    <select id="thinking-level-select" aria-label="Effort" disabled>
+                                        <option value="4096">Low</option>
+                                        <option value="8192" selected>Medium</option>
+                                        <option value="16384">High</option>
+                                        <option value="32768">Extra</option>
+                                        <option value="65536">Max</option>
+                                        <option value="131072">Ultracode</option>
+                                    </select>
+                                </label>
+                                <label class="composer-select composer-model-select" for="model-select">
+                                    <span class="sr-only">模型</span>
+                                    <i data-lucide="sparkles" aria-hidden="true"></i>
+                                    <select id="model-select" aria-label="Claude 模型" disabled>
+                                        <option value="">正在加载模型</option>
+                                    </select>
+                                </label>
+                            </div>
+                        </div>
+                        <div id="command-menu" class="command-menu" hidden role="listbox" aria-label="可用命令"></div>
+                    </form>
+                </section>
+
+                <aside class="inspector" aria-label="会话检查器">
+                    <div class="inspector-tabs" role="tablist" aria-label="检查器视图">
+                        <button class="inspector-tab" type="button" role="tab" aria-selected="true" data-panel="activity-panel">活动</button>
+                        <button class="inspector-tab" type="button" role="tab" aria-selected="false" data-panel="changes-panel">变更</button>
+                    </div>
+                    <section id="activity-panel" class="inspector-panel" role="tabpanel">
+                        <ol id="activity-list" class="activity-list"></ol>
+                    </section>
+                    <section id="changes-panel" class="inspector-panel" role="tabpanel" hidden>
+                        <div id="changes-list" class="changes-list"></div>
+                    </section>
+                </aside>
+            </div>
+        </section>
+    </main>
+
+    <dialog id="session-rename-dialog" class="session-dialog" aria-labelledby="session-rename-title">
+        <form method="dialog" id="session-rename-form">
+            <h2 id="session-rename-title">重命名会话</h2>
+            <label for="session-rename-input">名称</label>
+            <input id="session-rename-input" maxlength="120" required />
+            <div class="session-dialog-actions">
+                <button type="button" class="button button-secondary" data-dialog-close>取消</button>
+                <button type="submit" class="button button-primary">保存</button>
+            </div>
+        </form>
+    </dialog>
+
+    <dialog id="session-delete-dialog" class="session-dialog" aria-labelledby="session-delete-title">
+        <form method="dialog" id="session-delete-form">
+            <h2 id="session-delete-title">删除 H5 会话历史？</h2>
+            <p>这只会删除本浏览器中的 H5 会话记录，并关闭仍在运行的 Agent。不会删除 Claude 原生记录、工作区文件或 Git worktree。</p>
+            <div class="session-dialog-actions">
+                <button type="button" class="button button-secondary" data-dialog-close>取消</button>
+                <button type="submit" class="button button-danger">删除</button>
+            </div>
+        </form>
+    </dialog>
+
+    <dialog id="workspace-dialog" class="workspace-dialog" aria-labelledby="workspace-dialog-title">
+        <div class="workspace-dialog-content">
+            <header class="workspace-dialog-header">
+                <div>
+                    <h2 id="workspace-dialog-title">工作区管理</h2>
+                    <p id="workspace-dialog-description">选择已有工作区，或输入新工作区。</p>
+                </div>
+                <button type="button" class="icon-button" aria-label="关闭工作区管理" data-tooltip="关闭" data-workspace-dialog-close>
+                    <i data-lucide="x"></i>
+                </button>
+            </header>
+
+            <div class="workspace-scope-switch" role="group" aria-label="工作区类型">
+                <button type="button" class="workspace-scope-button" data-workspace-scope="local">
+                    <i data-lucide="laptop" aria-hidden="true"></i><span>本地</span>
+                </button>
+                <button type="button" class="workspace-scope-button" data-workspace-scope="server">
+                    <i data-lucide="server-cog" aria-hidden="true"></i><span>服务端</span>
+                </button>
+            </div>
+
+            <div class="workspace-tabs" role="tablist" aria-label="工作区管理方式">
+                <button id="workspace-management-tab" class="workspace-tab" type="button" role="tab" aria-controls="workspace-management-panel" aria-selected="true">工作区管理</button>
+                <button id="workspace-git-tab" class="workspace-tab" type="button" role="tab" aria-controls="workspace-git-panel" aria-selected="false">Git 仓库</button>
+            </div>
+
+            <section id="workspace-management-panel" class="workspace-panel" role="tabpanel" aria-labelledby="workspace-management-tab">
+                <div class="workspace-entry-section">
+                    <label for="workspace-existing-select">已有工作区</label>
+                    <div class="workspace-entry-row">
+                        <select id="workspace-existing-select" aria-label="选择已有工作区"></select>
+                        <button id="workspace-existing-use-button" type="button" class="button button-secondary">选择工作区</button>
+                    </div>
+                    <p id="workspace-existing-help" class="field-help"></p>
+                </div>
+
+                <div class="workspace-entry-section" hidden>
+                    <form id="workspace-new-form" class="workspace-form">
+                        <label id="workspace-new-label" for="workspace-new-input">新工作区路径</label>
+                        <input id="workspace-new-input" type="text" autocomplete="off" required />
+                        <p id="workspace-new-help" class="field-help"></p>
+                        <div class="workspace-form-actions">
+                            <button id="workspace-new-submit" type="submit" class="button button-primary">创建工作区</button>
+                        </div>
+                    </form>
+                </div>
+            </section>
+
+            <section id="workspace-git-panel" class="workspace-panel" role="tabpanel" aria-labelledby="workspace-git-tab" hidden>
+                <form id="workspace-git-form" class="workspace-form">
+                    <label for="workspace-git-workspace-select">目标工作区</label>
+                    <select id="workspace-git-workspace-select" required></select>
+                    <label for="workspace-repository-url">Git 仓库地址</label>
+                    <input id="workspace-repository-url" type="url" autocomplete="url" placeholder="https://git.example.com/group/project.git" required />
+                    <p id="workspace-git-unavailable" class="field-help field-help-warning" hidden>当前服务未配置允许克隆的 Git 主机。</p>
+                    <p id="workspace-git-help" class="field-help"></p>
+                    <div class="workspace-form-actions">
+                        <button id="workspace-git-submit" type="submit" class="button button-primary">下载代码</button>
+                    </div>
+                </form>
+            </section>
+
+            <p id="workspace-dialog-status" class="workspace-dialog-status" aria-live="polite" hidden></p>
+        </div>
+    </dialog>
+</body>
+</html>
