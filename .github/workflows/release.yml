@@ -138,7 +138,8 @@ jobs:
       - name: Create or update GitHub Release
         shell: bash
         env:
-          GITHUB_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
           TAG: ${{ needs.prepare.outputs.tag }}
           PRERELEASE: ${{ needs.prepare.outputs.prerelease }}
           EVENT_NAME: ${{ github.event_name }}
