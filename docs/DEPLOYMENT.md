@@ -13,6 +13,20 @@ claudecodeh5 会让服务进程代表用户运行 Claude Code、访问工作区�
 
 不要使用个人管理员账户运行服务，也不要把 API Key、网关令牌、代理凭据或浏览器会话数据写入发布包。
 
+## 通过 GitHub Release 安装
+
+GitHub Release 提供四种自包含发布包：`claudecodeh5-<tag>-win-x64.zip`、`claudecodeh5-<tag>-win-arm64.zip`、`claudecodeh5-<tag>-osx-x64.zip` 和 `claudecodeh5-<tag>-osx-arm64.zip`。下载与目标操作系统及 CPU 架构匹配的 ZIP 并解压到部署目录；这些包不包含本地配置或 `bridge/node_modules`。
+
+在解压目录中先安装 Bridge 的生产依赖：
+
+```bash
+cd bridge
+npm ci --omit=dev
+cd ..
+```
+
+随后从示例创建 `appsettings.Local.json`，按目标主机配置后启动对应的自包含可执行文件。不要将本地配置重新归档或上传到 Release。
+
 ## 生成发布包
 
 在项目根目录执行：
