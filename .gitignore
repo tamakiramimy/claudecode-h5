@@ -17,3 +17,4 @@ publish/
 agent-workspace/.claude/
 /.claudecode/
 agent-workspace/*.png
+/.claude
