@@ -74,6 +74,7 @@ const state = {
     eventSource: null,
     history: new Map(),
     historyWriteTimers: new Map(),
+    isCreatingSession: false,
     menuSessionId: null,
     pendingDialogSessionId: null,
     settingsUpdate: Promise.resolve(),
@@ -286,10 +287,42 @@ async function loadSessions() {
 }
 
 async function handleNewSessionAction() {
+    const workspaceId = elements.chatWorkspaceSelect?.value || state.draftWorkspaceId || state.workspaces[0]?.id || null;
+    if (!workspaceId) {
+        showRuntimeError("请先选择工作区。");
+        return;
+    }
+
+    if (state.isCreatingSession) {
+        return;
+    }
+
+    const permissionMode = elements.permissionMode.value;
+    const maxThinkingTokens = Number(elements.thinkingLevel.value) || 8192;
+    state.isCreatingSession = true;
+    state.draftWorkspaceId = workspaceId;
     state.activeSessionId = "draft";
-    state.draftWorkspaceId = state.draftWorkspaceId || state.workspaces[0]?.id || null;
     render();
-    elements.input?.focus();
+    try {
+        const newSession = await requestJson("/api/agent/sessions", {
+            method: "POST",
+            body: JSON.stringify({
+                workspaceId,
+                permissionMode,
+                maxThinkingTokens
+            })
+        });
+        state.sessions = [newSession, ...state.sessions.filter((session) => session.id !== newSession.id)];
+        ensureView(newSession.id);
+        state.activeSessionId = newSession.id;
+        void activateSession(newSession.id);
+    } catch (error) {
+        showRuntimeError(error.message);
+    } finally {
+        state.isCreatingSession = false;
+        render();
+        elements.input?.focus();
+    }
 }
 
 function prepareNewSession() {
@@ -940,7 +973,11 @@ async function submitPrompt() {
         try {
             const newSession = await requestJson("/api/agent/sessions", {
                 method: "POST",
-                body: JSON.stringify({ workspaceId: selectedWorkspaceId, permissionMode: elements.permissionMode.value })
+                body: JSON.stringify({
+                    workspaceId: selectedWorkspaceId,
+                    permissionMode: elements.permissionMode.value,
+                    maxThinkingTokens: Number(elements.thinkingLevel.value) || 8192
+                })
             });
             state.sessions = [newSession, ...state.sessions.filter((s) => s.id !== newSession.id)];
             ensureView(newSession.id);
@@ -1915,7 +1952,8 @@ function renderComposer() {
     const resumable = Boolean(session?.claudeSessionId);
     const isConfiguring = Boolean(view?.isConfiguring);
     const isPromptSubmitting = Boolean(view?.isPromptSubmitting);
-    const disabled = (!session && !isDraft) || (isTerminal && !resumable) || isConfiguring || isPromptSubmitting;
+    const isCreatingSession = Boolean(state.isCreatingSession);
+    const disabled = isCreatingSession || (!session && !isDraft) || (isTerminal && !resumable) || isConfiguring || isPromptSubmitting;
     const isRunning = session && ["starting", "working"].includes(session.status);
     const isStopping = session?.status === "stopping";
     const canConfigure = Boolean(session && session.status === "idle");
@@ -1937,7 +1975,7 @@ function renderComposer() {
         ? "<i data-lucide='square'></i><span class='sr-only'>停止</span>"
         : "<i data-lucide='arrow-up'></i><span class='sr-only'>发送</span>";
     elements.input.placeholder = disabled
-        ? isConfiguring ? "正在应用 Mode、模型或 Effort" : isPromptSubmitting ? "正在提交消息" : session ? "此会话无法恢复，请新建会话继续" : "请点击左侧“新建会话”开始"
+        ? isCreatingSession ? "正在创建会话" : isConfiguring ? "正在应用 Mode、模型或 Effort" : isPromptSubmitting ? "正在提交消息" : session ? "此会话无法恢复，请新建会话继续" : "请点击左侧“新建会话”开始"
         : isTerminal ? "发送消息以恢复此会话"
         : "描述任务，或输入 / 使用原生命令与技能";
 }
@@ -1967,8 +2005,10 @@ function renderModelOptions(session) {
         option.textContent = selectedModel;
         elements.modelSelect.append(option);
     }
-    elements.modelSelect.value = selectedModel;
-    elements.thinkingLevel.value = String(view?.maxThinkingTokens || 8192);
+    if (session) {
+        elements.modelSelect.value = selectedModel;
+        elements.thinkingLevel.value = String(view?.maxThinkingTokens || 8192);
+    }
 }
 
 function updateSessionSettings(patch) {

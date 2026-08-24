@@ -56,6 +56,8 @@ public sealed class AgentSessionManager(
 
         var workspace = workspaces.GetRequired(request.WorkspaceId);
         var permissionMode = NormalizePermissionMode(request.PermissionMode);
+        var model = NormalizeModel(request.Model);
+        var thinkingTokens = NormalizeThinkingTokens(request.MaxThinkingTokens) ?? DefaultThinkingTokens;
 
         var sessionId = Guid.NewGuid().ToString("N");
         var allocation = await worktrees.AllocateAsync(
@@ -78,7 +80,11 @@ public sealed class AgentSessionManager(
             null,
             workspace.Summary.WorkspaceScope,
             workspace.Path);
-        var managedSession = new ManagedAgentSession(browserSessionId, summary, allocation.WorkingDirectory);
+        var managedSession = new ManagedAgentSession(browserSessionId, summary, allocation.WorkingDirectory)
+        {
+            Model = model,
+            MaxThinkingTokens = thinkingTokens
+        };
         if (!_sessions.TryAdd(sessionId, managedSession))
         {
             throw new InvalidOperationException("Unable to create the Agent session.");
@@ -97,7 +103,8 @@ public sealed class AgentSessionManager(
                     SessionId: sessionId,
                     WorkspacePath: allocation.WorkingDirectory,
                     PermissionMode: permissionMode,
-                    MaxThinkingTokens: DefaultThinkingTokens),
+                    Model: model,
+                    MaxThinkingTokens: thinkingTokens),
                 message => HandleBridgeMessageAsync(managedSession, message),
                 cancellationToken);
             Publish(managedSession, "session-created", JsonSerializer.SerializeToElement(summary));
